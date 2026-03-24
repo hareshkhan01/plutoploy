@@ -19,7 +19,9 @@ app.get("/health", (c) => {
 
 // Deploy endpoint (placeholder)
 app.post("/deploy", (c) => {
-  return c.json({ message: "Deploy endpoint - coming soon!" });
+  // return c.json({ message: "Deploy endpoint - coming soon!" });
+
+  const r 
 });
 
 const port = 3000;
