@@ -1,5 +1,5 @@
 import { pullImage, createAndStartContainer } from '../handlers/podman-cli.handler';
-import { generateCaddyConfig, reloadCaddy } from '../handlers/caddy.handler';
+import { addCaddyRoute } from '../handlers/caddy.handler';
 import type { DeploymentConfig } from '../types/config';
 
 /**
@@ -19,12 +19,9 @@ export const deployApp = async (config: DeploymentConfig) => {
         console.log(`Creating container on port ${port}`);
         const containerId = await createAndStartContainer(port, imageName, deployId);
         
-        // 3. Generate Caddy config
-        console.log(`Configuring Caddy for ${subdomain}...`);
-        await generateCaddyConfig(deployId, subdomain, port);
-        
-        // 4. Reload Caddy
-        await reloadCaddy();
+        // 3. Add Caddy route via SQLite
+        console.log(`Adding Caddy route for ${subdomain}...`);
+        await addCaddyRoute(deployId, subdomain, port);
         
         console.log(`✅ Deployment ${deployId} successful!`);
         

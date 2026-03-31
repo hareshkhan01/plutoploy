@@ -1,4 +1,5 @@
 import { startServer } from "./backend/server";
+import './backend/src/db/database'; // Initialize database
 
 console.log('Starting Plutoploy deployment platform...');
 process.stdout.write(''); // Flush stdout

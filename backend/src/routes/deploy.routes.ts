@@ -2,35 +2,33 @@ import { Hono } from 'hono';
 import { deployApp } from '../services/deployment.service';
 import { removeDeployment } from '../handlers/caddy.handler';
 import { randomUUID } from 'crypto';
+import { deploymentDb } from '../db/database';
 
 const deployRoutes = new Hono();
 
-// In-memory storage (replace with database later)
-const deployments = new Map<string, any>();
-let nextPort = 3001;
-
 /**
- * Find next available port
+ * Find next available port from database
  */
 async function findAvailablePort(): Promise<number> {
-    const usedPorts = new Set(Array.from(deployments.values()).map(d => d.port));
+    const usedPorts = new Set(deploymentDb.getUsedPorts());
+    let port = 3001;
     
     // Check if port is actually in use by checking with lsof
     while (true) {
-        if (!usedPorts.has(nextPort)) {
+        if (!usedPorts.has(port)) {
             try {
                 // Quick check if port is available
                 const { execSync } = await import('child_process');
-                const result = execSync(`lsof -ti:${nextPort} 2>/dev/null || echo "available"`).toString().trim();
+                const result = execSync(`lsof -ti:${port} 2>/dev/null || echo "available"`).toString().trim();
                 if (result === 'available') {
-                    return nextPort++;
+                    return port;
                 }
             } catch {
                 // If lsof fails, assume port is available
-                return nextPort++;
+                return port;
             }
         }
-        nextPort++;
+        port++;
     }
 }
 
@@ -55,8 +53,7 @@ deployRoutes.post('/deploy', async (c) => {
         }
         
         // Check if subdomain is taken
-        const existing = Array.from(deployments.values()).find(d => d.subdomain === subdomain);
-        if (existing) {
+        if (deploymentDb.subdomainExists(subdomain)) {
             return c.json({ error: 'Subdomain already taken' }, 409);
         }
         
@@ -74,13 +71,21 @@ deployRoutes.post('/deploy', async (c) => {
             imageName: image
         });
         
-        // Store deployment info
+        // Store deployment in database
+        deploymentDb.create({
+            deployId,
+            subdomain,
+            port,
+            imageName: image,
+            containerId: result.containerId,
+            repo
+        });
+        
         const deployment = {
             ...result,
             repo,
             createdAt: new Date().toISOString()
         };
-        deployments.set(deployId, deployment);
         
         return c.json({
             success: true,
@@ -101,9 +106,10 @@ deployRoutes.post('/deploy', async (c) => {
  * List all deployments
  */
 deployRoutes.get('/deployments', (c) => {
+    const allDeployments = deploymentDb.getAll();
     return c.json({
-        deployments: Array.from(deployments.values()),
-        count: deployments.size
+        deployments: allDeployments,
+        count: allDeployments.length
     });
 });
 
@@ -112,7 +118,7 @@ deployRoutes.get('/deployments', (c) => {
  */
 deployRoutes.get('/deployments/:id', (c) => {
     const deployId = c.req.param('id');
-    const deployment = deployments.get(deployId);
+    const deployment = deploymentDb.getById(deployId);
     
     if (!deployment) {
         return c.json({ error: 'Deployment not found' }, 404);
@@ -127,13 +133,14 @@ deployRoutes.get('/deployments/:id', (c) => {
 deployRoutes.delete('/deployments/:id', async (c) => {
     const deployId = c.req.param('id');
     
-    if (!deployments.has(deployId)) {
+    const deployment = deploymentDb.getById(deployId);
+    if (!deployment) {
         return c.json({ error: 'Deployment not found' }, 404);
     }
     
     try {
         await removeDeployment(deployId);
-        deployments.delete(deployId);
+        deploymentDb.delete(deployId);
         
         return c.json({ 
             success: true,
@@ -145,6 +152,18 @@ deployRoutes.delete('/deployments/:id', async (c) => {
             error: error.message 
         }, 500);
     }
+});
+
+/**
+ * Get all Caddy routes (for debugging)
+ */
+deployRoutes.get('/routes', (c) => {
+    const { routesDb } = require('../db/database');
+    const routes = routesDb.getAll();
+    return c.json({
+        routes,
+        count: routes.length
+    });
 });
 
 export { deployRoutes };
