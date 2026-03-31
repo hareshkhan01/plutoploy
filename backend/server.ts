@@ -1,37 +1,102 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { createServer } from 'http';
+import { deployRoutes } from "./src/routes/deploy.routes";
+
 const app = new Hono();
+
 // Enable CORS
 app.use("/*", cors());
 
-// Test endpoint
-app.get("/index", (c) => {
+// Health check endpoints
+app.get("/", (c) => {
   return c.json({
-    message: "Deployment Platform API (Hono + Bun)",
+    message: "Deployment Platform API",
     status: "running",
-    runtime: "Bun",
+    version: "1.0.0"
   });
 });
 
 app.get("/health", (c) => {
-  return c.json({ message: "Deployment online :)" });
+  return c.json({ status: "healthy" });
 });
 
-// Deploy endpoint (placeholder)
-app.post("/deploy", (c) => {
-  // return c.json({ message: "Deploy endpoint - coming soon!" });
-
-  const r 
+// Test POST endpoint
+app.post("/test", async (c) => {
+  const body = await c.req.json();
+  return c.json({ received: body, success: true });
 });
 
-const port = 3000;
+// Mount deployment routes
+app.route('/api', deployRoutes);
+
+const port = parseInt(process.env.PORT || '3000');
 
 export function startServer() {
-  Bun.serve({
-    port,
-    fetch: app.fetch,
+  console.log('Initializing server...');
+  process.stdout.write(''); // Flush stdout
+  
+  const server = createServer(async (req, res) => {
+    try {
+      // Read body for POST/PUT/PATCH requests
+      let requestBody: Buffer | undefined;
+      if (req.method !== 'GET' && req.method !== 'HEAD') {
+        requestBody = await new Promise<Buffer>((resolve) => {
+          const chunks: Buffer[] = [];
+          req.on('data', (chunk) => chunks.push(chunk));
+          req.on('end', () => resolve(Buffer.concat(chunks)));
+          req.on('error', () => resolve(Buffer.from('')));
+        });
+      }
+      
+      const response = await app.fetch(
+        new Request(`http://localhost:${port}${req.url}`, {
+          method: req.method,
+          headers: req.headers as any,
+          body: requestBody
+        })
+      );
+      
+      res.statusCode = response.status;
+      response.headers.forEach((value, key) => {
+        res.setHeader(key, value);
+      });
+      
+      const responseBody = await response.text();
+      res.end(responseBody);
+    } catch (error) {
+      console.error('Request error:', error);
+      res.statusCode = 500;
+      res.end(JSON.stringify({ error: 'Internal server error' }));
+    }
   });
-  console.log(`🚀 Server running on port ${port}`);
+  
+  server.listen(port, () => {
+    console.log(`🚀 Deployment API running on port ${port}`);
+    console.log(`📍 Endpoints:`);
+    console.log(`   POST   /api/deploy`);
+    console.log(`   GET    /api/deployments`);
+    console.log(`   GET    /api/deployments/:id`);
+    console.log(`   DELETE /api/deployments/:id`);
+    process.stdout.write(''); // Flush stdout
+  });
+  
+  // Graceful shutdown
+  process.on('SIGINT', () => {
+    console.log('\n👋 Shutting down gracefully...');
+    server.close(() => {
+      process.exit(0);
+    });
+  });
+  
+  process.on('SIGTERM', () => {
+    console.log('\n👋 Shutting down gracefully...');
+    server.close(() => {
+      process.exit(0);
+    });
+  });
+  
+  return server;
 }
 
-export { app, port };
+export { app };
